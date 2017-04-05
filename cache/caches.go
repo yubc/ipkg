@@ -1,5 +1,11 @@
 package cache
 
+import (
+	"time"
+)
+
+var cc = make(map[string]*entry)
+
 //传参函数
 type Func func(key string) (interface{}, error)
 
@@ -11,8 +17,9 @@ type result struct {
 
 //计算解析
 type entry struct {
-	res   result
-	ready chan struct{}
+	res     result
+	outtime int64
+	ready   chan struct{}
 }
 
 //中间数据
@@ -31,6 +38,7 @@ func New(f Func) *Memo {
 	}
 
 	go memo.server(f)
+	go memo.out()
 	return memo
 }
 
@@ -45,17 +53,32 @@ func (m *Memo) Get(key string) (interface{}, error) {
 }
 
 func (m *Memo) server(f Func) {
-	cc := make(map[string]*entry)
 	for res := range m.respones {
 		e := cc[res.key]
 		if e == nil {
 			e = &entry{
-				ready: make(chan struct{}),
+				outtime: time.Now().Unix(),
+				ready:   make(chan struct{}),
 			}
 			cc[res.key] = e
 			go e.call(f, res.key)
 		}
 		go e.deliver(res.respone)
+	}
+}
+
+func (e *Memo) out() {
+	tick := time.NewTicker(10 * time.Minute)
+	out := 5 * time.Minute
+	for {
+		select {
+		case <-tick.C:
+			for k, v := range cc {
+				if time.Since(time.Unix(v.outtime, 0)) >= out {
+					delete(cc, k)
+				}
+			}
+		}
 	}
 }
 
